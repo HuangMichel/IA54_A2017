@@ -1,0 +1,168 @@
+package fr.utbm.ia54.TP2.hollonresearch
+
+import io.sarl.core.Initialize
+import io.sarl.core.Logging
+import io.sarl.core.Lifecycle
+import io.sarl.core.Schedules
+import io.sarl.core.DefaultContextInteractions
+import java.io.File
+import io.sarl.core.InnerContextAccess
+import java.util.UUID
+import java.util.Map
+import java.util.HashMap
+import io.sarl.core.Destroy
+import io.sarl.util.Scopes
+import io.sarl.core.Behaviors
+
+event Stop
+
+event FoundFile{
+	var File : File
+}
+
+event SearchRequest{
+	var xtensionFile : String
+	var pathFile : File
+}
+
+agent SearchManager{
+	uses Logging, Lifecycle, Schedules, DefaultContextInteractions
+	var xten : String
+	var pfile : String
+	
+	on Initialize{
+		loggingName = "SearchManager"
+		info("Initialize SearchManager")
+		if (occurrence.parameters.isEmpty()) {
+			info("Empty parameters in SARL environment, we will use default parameters")
+			xten = ".md"
+			pfile = "C:\\Users\\Michel\\Desktop\\IA54_A2017"
+			info("extension file " + xten)
+			info("path " + pfile)
+		}else{
+			info("Find parameters in SARL environment")
+			xten = occurrence.parameters.get(0) as String
+			pfile = occurrence.parameters.get(1) as String
+			info("extension file " + xten)
+			info("path " + pfile)
+		}
+		if (defaultSpace.participants.size() == 1) {
+			spawn(SearchAgent)
+		}
+		val task = task("WAITING_SEARCHAGENT")
+		task.every(1000)[
+			if(defaultSpace.participants.size()>1){
+				info("Found SearchAgent")
+				emit(new SearchRequest => [xtensionFile = xten;
+					pathFile = new File(pfile)])
+				every(5000)[if(getDefaultContext().defaultSpace.participants.size()==1){
+					info("I'm alone, killMySelf")
+					killMe
+				}else{
+					info("Still searching file endwiths " + xten)
+				}]
+				task.cancel
+			}else{
+				info("Waiting SearchAgent")
+			}
+		]
+	}
+	
+	on FoundFile{
+		info("Found File " + occurrence.File + " by receiver " + ID + ", source : " + occurrence.source.UUID)
+	}
+	
+	on Destroy{
+		info("SearchManager go to die")
+	}
+	
+}
+
+agent SearchAgent {
+	uses Logging, Lifecycle, DefaultContextInteractions, InnerContextAccess, Schedules, Behaviors
+
+	var map : Map<UUID, File> = new HashMap<UUID, File>()
+	var tension : String
+	var File : File
+	
+	on Initialize {
+		loggingName = "SearchAgent"
+		info("Initialize SearchAgent " + (defaultSpace.participants.size()-1))
+		if (defaultSpace.participants.size() == 1) {
+			spawn(SearchManager)
+		}
+	}
+	
+	on SearchRequest{
+		loggingName = "Child"
+		File = occurrence.pathFile
+		tension = occurrence.xtensionFile
+		info("Launched search request in " + File)
+		
+		var dir = File;
+		
+		if (dir.exists) {
+			for (f : dir.listFiles()) {
+				var fileName = f.getName
+				if (!((fileName.startsWith(".")) || (fileName.startsWith(".."))) && f.isDirectory()) {
+					info(fileName + " is a directory")
+					val targetID = spawnInContext(SearchAgent, innerContext, f)
+					map.put(targetID, f)
+					val ^event = new SearchRequest => [
+						source = innerContext.defaultSpace.getAddress(ID);
+						xtensionFile = tension;
+						pathFile = f
+					]
+					emit(^event, Scopes.addresses(innerContext.defaultSpace.getAddress(targetID)))
+				} else if ((fileName.startsWith(".")) || (fileName.startsWith(".."))) {
+					info( fileName  + " is hidden directory startswith . or ..")
+					}
+					else{
+					info(fileName + " is a file")
+					if(fileName.endsWith(tension)){
+						emit(new FoundFile => [File = f], 
+							Scopes.addresses(occurrence.source)
+						)
+						info(fileName + " endswith " + tension)
+					}else{
+						info(fileName + " is not that file endswith " + tension)
+					}
+					
+				}
+			}
+			
+			/*every(500)[if(innerContext.defaultSpace.participants.size()>1){
+				info("Kill the child")
+				wake(new Stop)
+			}]*/
+			
+		}else{
+			throw new IllegalArgumentException("Le chemin n'existe pas")
+		}
+	}
+	
+	on Stop{
+		info("Stop the receiver " + ID + ", source :" + occurrence.source.UUID)
+		killMe
+	}
+	
+	on Destroy{
+		info("Child go to die");
+	}
+}
+
+agent BootAgent {
+	uses Logging, Lifecycle
+	
+	on Initialize {
+		loggingName = "Boot"
+		info("Spawn SearchAgent and SearchManager")
+		spawn(SearchManager)
+		spawn(SearchAgent)
+		killMe
+	}
+	
+	on Destroy{
+		info("BootAgent go to die")
+	}
+}

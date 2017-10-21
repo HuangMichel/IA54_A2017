@@ -13,8 +13,6 @@ import io.sarl.core.Behaviors
 
 event Stop
 
-event Go
-
 event FoundFile{
 	var File : File
 	new(f:File){
