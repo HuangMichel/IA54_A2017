@@ -1,0 +1,99 @@
+
+import io.sarl.core.DefaultContextInteractions
+import io.sarl.core.Initialize
+import io.sarl.core.InnerContextAccess
+import io.sarl.core.Lifecycle
+import io.sarl.core.Logging
+import io.sarl.core.Schedules
+import java.io.File
+import io.sarl.core.Behaviors
+
+event Search {
+	val typeFile = "txt" // change here the extension of the file we want to search
+	var startPath : File
+	new (file:File){
+		startPath = file
+	}
+}
+
+event Found {
+	var FoundPath : File
+	new (file:File){
+		FoundPath = file
+	}
+}
+
+event Ready
+
+
+agent SearchManager {
+	
+	uses DefaultContextInteractions, Lifecycle, Logging, Schedules
+	
+	on Initialize {
+		loggingName = "SearchManager"
+		spawn(SearchAgent)
+	}
+	
+	on Ready {
+		task("discover").cancel
+		emit(new Search(new File("C:\\Users\\Michel\\Desktop\\IA54_A2017"))) // change here the path of the directory we want to search in
+		killMe
+	}
+	
+	on Found {
+		
+	}
+
+}
+
+agent SearchAgent {
+
+	uses DefaultContextInteractions, Lifecycle, Logging, Schedules, InnerContextAccess, Behaviors
+
+	var isRoot : boolean
+	on Initialize {
+		
+
+		if (occurrence.parameters.isEmpty) {
+			task("discover").every(2000)[emit(new Ready)] // waiting the searchmanager
+			isRoot = true
+			info("is root")
+		}
+		else {
+			isRoot = false
+			var path = occurrence.parameters.get(0) as File // we get the path that the father passed on the creation of the child
+			
+			wake(new Search(path))
+
+		}
+	}
+	
+	on Search {
+		loggingName = "Holon in " + occurrence.startPath
+		val dir = occurrence.startPath
+		
+		for(f : dir.listFiles()){ //for each file in the list of file
+			if (f.isDirectory){
+				SearchAgent.spawnInContext(innerContext, f)				
+			}
+			else if(f.isFile){
+				var name = f.getName()
+				
+				if (occurrence.typeFile == name.substring(name.lastIndexOf(".") + 1)) { // getting the extension of the file
+					error(f) // error() to print in red
+				}
+			
+		}
+		
+		}
+		info("finished search in " + occurrence.startPath)
+		every(1000) [
+			if (innerContext.defaultSpace.participants.size == 1) { //killing himself if there is no child left
+				info("No more child: I'm killing myself.")
+				killMe
+			}
+		]
+	}
+
+}
